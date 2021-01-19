@@ -1,0 +1,16 @@
+/.aws-sam
+/testdata
+
+node_modules
+package-lock.json
+.env
+/doc
+local/*
+local-*
+/local*
+/reports/*
+/.~lock*
+/test.js
+/test-zip.zip
+.chrome
+/packaged.yaml

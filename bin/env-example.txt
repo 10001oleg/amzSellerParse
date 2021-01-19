@@ -1,0 +1,4 @@
+#!/bin/bash
+
+export INSTANCE_IP=1.1.1.1
+export INSTANCE_KEY=~/path/to/ec2-keyfile.pem

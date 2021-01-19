@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: WSS for American distribution HUB
+
+Parameters:
+  DbUri:
+    Type: String
+    Description: >
+      (Required) PG DB connection string, example 'postgresql://dbuser:secretpassword@database.server.com:3211/mydb '
+      and ": / ? # [ ] @" characters must be converted using percent encoding.
+    ConstraintDescription: "Required."
+  StageName:
+    Type: String
+    Default: "dev"
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: adh-wss
+
+Resources:
+  wssApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: adh
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: !Ref StageName
+      Description: Version 1 'stage'
+      DeploymentId: !Ref wssDeployment
+      ApiId: !Ref wssApi
+  wssDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - wssConnectRoute
+      - wssPingRoute
+      - wssDisconnectRoute
+    Properties:
+      ApiId: !Ref wssApi
+
+  wssConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref wssApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: wssConnectRoute
+      Target: !Sub integrations/${wssConnectIntegration}
+  wssConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref wssApi
+      Description: Ping Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaConnect.Arn}/invocations
+
+  wssDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref wssApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: wssDisconnectRoute
+      Target: !Sub integrations/${wssDisconnectIntegration}
+  wssDisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref wssApi
+      Description: Ping Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaDisconnect.Arn}/invocations
+
+  wssPingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref wssApi
+      RouteKey: "ping"
+      AuthorizationType: NONE
+      OperationName: wssPingRoute
+      Target: !Sub integrations/${wssPingIntegration}
+  wssPingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref wssApi
+      Description: Ping Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaPing.Arn}/invocations
+
+  lambdaConnect:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 128
+      Runtime: nodejs12.x
+      CodeUri: ./lambdaConnect
+      Layers:
+        - !Ref lambdaPgLayer
+      Environment:
+        Variables:
+          DB_URI: !Ref DbUri
+      Role: !GetAtt lambdaRole.Arn
+  lambdaDisconnect:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 128
+      Runtime: nodejs12.x
+      CodeUri: ./lambdaDisconnect
+      Environment:
+        Variables:
+          DB_URI: !Ref DbUri
+      Layers:
+        - !Ref lambdaPgLayer
+      Role: !GetAtt lambdaRole.Arn
+  lambdaPing:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 128
+      Runtime: nodejs12.x
+      CodeUri: ./lambdaPing
+      Environment:
+        Variables:
+          DB_URI: !Ref DbUri
+      Layers:
+        - !Ref lambdaPgLayer
+      Role: !GetAtt lambdaRole.Arn
+
+  lambdaPingPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - wssApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambdaPing
+      Principal: apigateway.amazonaws.com
+  lambdaConnectPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - wssApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambdaConnect
+      Principal: apigateway.amazonaws.com
+  lambdaDisconnectPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - wssApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambdaDisconnect
+      Principal: apigateway.amazonaws.com
+
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # RoleName: !Sub ${AWS::StackName}-lambda-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+              # - lambda:InvokeFunction
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - apigateway.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        # - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        # - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+      Policies:
+        - PolicyName: lambdaWSSpolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "execute-api:ManageConnections"
+                Resource:
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${wssApi}/*
+      Path: /
+
+  # LOGGING AWS ACCOUNT
+  ApiGwAccountConfig:
+    Type: "AWS::ApiGateway::Account"
+    Properties:
+      CloudWatchRoleArn: !GetAtt "ApiGatewayLoggingRole.Arn"
+  ApiGatewayLoggingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "apigateway.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+  lambdaPgLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      #LayerName: pgLayer
+      ContentUri: layerPg/
+      CompatibleRuntimes:
+        - nodejs12.x
+      # RetentionPolicy: Retain
+      RetentionPolicy: Delete
+
+Outputs:
+  WebSocketURI:
+    Description: "The WSS Protocol URI to connect to"
+    Value: !Sub wss://${wssApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
