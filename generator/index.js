@@ -6,7 +6,7 @@ const AWS = require("aws-sdk");
 const mydb = require("./lib/mydb");
 const fs = require("fs");
 
-const WSS_endpoint = "f81r5c6ojg.execute-api.us-west-2.amazonaws.com/dev";
+const WSS_endpoint = process.env.WSS_ENDPOINT;
 
 const sqlProductRnd = `
 SELECT
@@ -30,7 +30,15 @@ INSERT INTO gn_order(
   "data"
 )
 VALUES (
-  $1,$2,$3,$4,$5,$6,$7
+  $1,
+  COALESCE(
+    $2,
+    GREATEST(
+      (SELECT MAX(order_date) FROM "gn_order"),
+      CURRENT_TIMESTAMP
+    ) + INTERVAL '10 SECOND'
+  ),
+  $3,$4,$5,$6,$7
 )
 RETURNING "gn_order_id"
 `;
@@ -186,7 +194,7 @@ const generateOneOrder = async (opts, genQtyParam) => {
   };
   const { rows: rowsOrderInsert } = await client.query(sqlGnOrderInsert, [
     "1111",
-    new Date(),
+    null, //new Date(),
     orderObj.store_id,
     JSON.stringify(items),
     JSON.stringify({ countryCode: "XX" }), // ship_address
