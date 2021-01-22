@@ -107,7 +107,7 @@ const serverWorker = async (opts = {}) => {
     );
     // console.log("maxOrderByDate", maxOrderByDate);
     if (!lastOrderId || lastOrderId != maxOrderByDate.gn_order_id) {
-      await postToAllConnections(optsStack, dashboard);
+      await postToAllConnections(optsStack, { orders: dashboard });
       lastOrderId = maxOrderByDate.gn_order_id;
       console.log(
         "lastOrderId = %s, dashboard sire: %s",
@@ -126,6 +126,9 @@ const serverWorker = async (opts = {}) => {
       console.log("No order in the future");
       needDelay = 1e3;
       if (opts.cbCreateNewOrders) {
+        await postToAllConnections(optsStack, {
+          status: { message: "now generate orders" },
+        });
         await opts.cbCreateNewOrders(optsStack);
       } else {
         console.log("no function opts.'cbCreateNewOrders'");
@@ -135,6 +138,10 @@ const serverWorker = async (opts = {}) => {
     const nextOrder = rowsNextOrder[0];
     console.log("nextOrder #%s last #%s", nextOrder.gn_order_id, lastOrderId);
     needDelay = nextOrder.order_date - Date.now();
+
+    await postToAllConnections(optsStack, {
+      status: { nextDelay: +(needDelay / 1e3).toFixed(1) },
+    });
     // delay loop
   }
 };
