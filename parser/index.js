@@ -76,6 +76,7 @@ UPDATE "store"
 SET "_date_updated" = CURRENT_TIMESTAMP
 WHERE "store_id" = $1
 `;
+
 const sqlProductsSelectByAsinAndStore = `
 SELECT
   product_id,
@@ -126,7 +127,9 @@ const sqlProductStoreDisableExcept = `
 UPDATE "product" p
 SET "is_deleted" = true
 WHERE "store_id" = $1 AND NOT "product_id" = ANY($2::integer[])
-RETURNING "product_id", "asin"`;
+RETURNING "product_id", "asin"
+`;
+
 const worker = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} worker`.trim();
   const { client } = opts;
@@ -267,8 +270,6 @@ const worker = async (opts) => {
       break;
     }
   }
-  console.log(allProducts);
-  // fs.writeFileSync("allProducts.json", JSON.stringify(allProducts));
   allProducts.map((e) => {
     if (e.star && typeof e.star == "string") {
       const matches = e.star.match(/\s*([\d.]+)\s*out of\s*([\d.]+)\s*star/);
@@ -307,9 +308,21 @@ const worker = async (opts) => {
     delete prod.old_img_s3;
 
     if (old_img_src) {
-      if (old_img_s3 && old_img_s3.origSrc == prod.imgSrc) {
+      if (
+        old_img_s3 &&
+        old_img_s3.location &&
+        old_img_s3.origSrc == prod.imgSrc
+      ) {
+        prod.imgSrc = old_img_s3.location;
         console.log("%s imgSrc orig not changes, continue", logPrefix);
         continue;
+      } else if (old_img_s3) {
+        console.log(
+          "%s imgSrc orig changes",
+          logPrefix,
+          old_img_s3.origSrc,
+          prod.imgSrc
+        );
       }
     }
 
@@ -346,11 +359,6 @@ const worker = async (opts) => {
       });
       pageClearFilter.goto(href);
     });
-    console.log(
-      "%s waiting 30sec to close second page, data = ",
-      logPrefix,
-      data && data.contentType
-    );
     // await new Promise((res) => setTimeout(res, 30 * 1e3));
     await pageClearFilter.close();
 
