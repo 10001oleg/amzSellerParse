@@ -1,0 +1,20 @@
+[
+  {
+    "name": "myChannel1",
+    "SELLER_ID": "***",
+    "AUTH_TOKEN": "amzn.mws.****",
+    "account_id": 1,
+    "MARKETPLACE_ID": "ATVPDKIKX0DER",
+    "AWS_ACCESS_KEY_ID": "****",
+    "AWS_SECRET_ACCESS_KEY": "*****"
+  },
+  {
+    "name": "myChannel2",
+    "SELLER_ID": "***",
+    "AUTH_TOKEN": "amzn.mws.****",
+    "account_id": 1,
+    "MARKETPLACE_ID": "ATVPDKIKX0DER",
+    "AWS_ACCESS_KEY_ID": "****",
+    "AWS_SECRET_ACCESS_KEY": "*****"
+  }
+]
