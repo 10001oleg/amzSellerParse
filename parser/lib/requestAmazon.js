@@ -1,6 +1,6 @@
 "use strict";
 const https = require("https");
-const qs = require("qs");
+const qs = require("querystring");
 const crypto = require("crypto");
 const xml2json = require("xml2json");
 

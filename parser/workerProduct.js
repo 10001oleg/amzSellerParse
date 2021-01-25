@@ -15,7 +15,7 @@ const mFunc = require("./lib/mFunc");
 // const pp = require("./lib/pp");
 const { handler: requestAmazon } = require("./lib/requestAmazon");
 
-const creds = JSON.parse(fs.readFileSync("./amazon_creds.json"));
+const creds = JSON.parse(fs.readFileSync(`${__dirname}/amazon_creds.json`));
 const getCred = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} getCred`.trim();
   for (;;) {
@@ -45,9 +45,11 @@ const sqlAmzProductUpdate = `
 UPDATE "product"
 SET
   "mws_product" = $2,
+  "data" = "data" || $3,
   "mws_product_lastupdate" = CURRENT_TIMESTAMP
 WHERE "asin" = $1
 `;
+
 const workerAmzProductUpdater = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} workerAmzProductUpdater`.trim();
   console.log("%s start", logPrefix);
@@ -58,7 +60,11 @@ const workerAmzProductUpdater = async (opts) => {
     await mydb.trxWrap(optsStack, async (client) => {
       console.log("%s trxWrap", logPrefix);
       const { rows } = await client.query(sqlAmzProductSelectForUpdate);
-      if (!(rows.length > 0)) return;
+      if (!(rows.length > 0)) {
+        console.log("%s nothing product for update. wait 30sec", logPrefix);
+        await new Promise((res) => setTimeout(res, 30e3));
+        return;
+      }
       const cred = await getCred(optsStack);
       const asins = [rows[0].asin];
       const { product_id } = rows[0];
@@ -138,11 +144,57 @@ const workerAmzProductUpdater = async (opts) => {
           console.log("Breakpoint");
           resItem.SalesRankings = [];
         }
-        return { asin: Id, status, data: resItem };
+        const packObj = resItem.AttributeSets.reduce((packObj, attrSet) => {
+          if (packObj) return packObj;
+          if (!attrSet) return undefined;
+          if (typeof attrSet != "object") return undefined;
+
+          const itemDim =
+            attrSet.PackageDimensions &&
+            Array.isArray(attrSet.PackageDimensions)
+              ? attrSet.PackageDimensions[0]
+              : attrSet.PackageDimensions;
+          const keys = ["Width", "Height", "Length", "Weight"];
+          for (const key of keys) {
+            if (!itemDim[key]) {
+              // prettier-ignore
+              console.log("%s product ASIN %s no key %s", logPrefix, Id, key);
+              return undefined;
+            }
+            if (!itemDim[key]["$t"] || !(+itemDim[key]["$t"] > 0.01)) {
+              // prettier-ignore
+              console.log("%s product ASIN %s no key %s value '$t'", logPrefix, Id, key);
+              return undefined;
+            }
+            if (!itemDim[key]["Units"]) {
+              // prettier-ignore
+              console.log("%s product ASIN %s no key %s value 'Units'", logPrefix, Id, key);
+              return undefined;
+            }
+            if (
+              itemDim[key]["Units"] !== (key == "Weight" ? "pounds" : "inches")
+            ) {
+              // prettier-ignore
+              console.log("%s product ASIN %s no key %s value 'Units' value wrong", logPrefix, Id, key);
+              return undefined;
+            }
+          }
+          return {
+            width: +itemDim.Width["$t"],
+            height: +itemDim.Height["$t"],
+            length: +itemDim.Length["$t"],
+            weight: +itemDim.Weight["$t"],
+          };
+        }, undefined);
+        return { asin: Id, status, data: resItem, packObj };
       });
 
-      for (const { data, asin } of asinsData) {
-        await client.query(sqlAmzProductUpdate, [asin, data]);
+      for (const { data, asin, packObj } of asinsData) {
+        await client.query(sqlAmzProductUpdate, [
+          asin,
+          data, // mws_product firels
+          JSON.stringify(packObj ? { pack: packObj } : {}), // data field updates
+        ]);
       }
     });
   }

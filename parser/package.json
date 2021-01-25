@@ -19,6 +19,7 @@
     "dotenv": "^8.2.0",
     "pg": "^8.5.1",
     "puppeteer": "^5.5.0",
-    "puppeteer-core": "^5.5.0"
+    "puppeteer-core": "^5.5.0",
+    "xml2json": "^0.12.0"
   }
 }
