@@ -199,6 +199,19 @@ const serverWorker = async (opts = {}) => {
     const nextOrder = rowsNextOrder[0];
     console.log("nextOrder #%s last #%s", nextOrder.gn_order_id, lastOrderId);
     needDelay = nextOrder.order_date - Date.now();
+    if (needDelay > 6 * 60 * 1e3) {
+      console.log("Very big delay between order");
+      needDelay = 1e3;
+      if (opts.cbCreateNewOrders) {
+        await postToAllConnections(optsStack, {
+          status: { message: "now generate orders" },
+        });
+        await opts.cbCreateNewOrders(optsStack);
+      } else {
+        console.log("no function opts.'cbCreateNewOrders'");
+      }
+      continue;
+    }
 
     await postToAllConnections(optsStack, {
       status: { nextDelay: +(needDelay / 1e3).toFixed(1) },
