@@ -117,7 +117,6 @@ const postToAllConnections = async (opts, messageObj) => {
   const { client, apigwManagementApi } = opts;
   const logPrefix = `${opts.logPrefix || ""} postToAllConnections`.trim();
   const messageStr = JSON.stringify(messageObj);
-  console.log("%s Try sending message %s chars", logPrefix, messageStr.length);
   //   const packed = require("jsonpack").pack(messageObj);
   //   console.log("%s Try sending packed message %s chars", logPrefix, packed.length);
 
@@ -130,14 +129,31 @@ const postToAllConnections = async (opts, messageObj) => {
     return { status: "SUCCESS", message: "No connections to postAll" };
   }
 
+  console.log(
+    "%s Try sending message %s chars to %s connections",
+    logPrefix,
+    messageStr.length,
+    conn_ids.length
+  );
+
   for (const connectionId of conn_ids) {
     console.log("%s post rows to %s", logPrefix, connectionId);
-    await apigwManagementApi
-      .postToConnection({
-        ConnectionId: connectionId,
-        Data: messageStr,
-      })
-      .promise();
+    try {
+      await apigwManagementApi
+        .postToConnection({
+          ConnectionId: connectionId,
+          Data: messageStr,
+        })
+        .promise();
+    } catch (err) {
+      console.error(
+        "%s Failed WebSocket postToConnection %s\nError: %s\nStack: %s",
+        logPrefix,
+        connectionId,
+        err.message,
+        err.stack
+      );
+    }
   }
 };
 const serverWorker = async (opts = {}) => {
