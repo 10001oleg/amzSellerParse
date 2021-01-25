@@ -48,6 +48,54 @@ const firstPage = async (browser) => {
     } //= await browser.newPage();
   }
 
+  if (!page) {
+    page = await browser.newPage();
+    // await page.setViewport({ width: 0, height: 0 });
+    // await page.goto("about:blank", { waitUntil: "domcontentloaded" });
+    // await page.setViewport({ width: 0, height: 0 });
+    //   page.on("request", (request) => {
+    //     if (request.resourceType() === "image") request.abort();
+    //     else request.continue();
+    //   });
+
+    try {
+      page.on("request", async (interceptedRequest) => {
+        if (
+          interceptedRequest.url().endsWith(".png") ||
+          interceptedRequest.url().endsWith(".jpg")
+        ) {
+          interceptedRequest.abort();
+        } else {
+          interceptedRequest.continue();
+        }
+      });
+      await page.setRequestInterception(true);
+    } catch (err2) {
+      //
+    }
+  }
+  if (!page) {
+    console.error("Can not get page or open new one");
+    throw Error("Can not get Browser Page");
+  }
+
+  return page;
+};
+
+const secordPageClear = async (browser) => {
+  let page;
+  if (!page && "pages" in browser) {
+    const pages = await browser.pages();
+    if (pages.length > 1) page = pages[1];
+  }
+
+  if ((await browser.pages()).length < 1) {
+    await browser.newPage();
+  }
+  if ((await browser.pages()).length < 1) {
+    await browser.newPage();
+  }
+
   if (!page) page = await browser.newPage();
   if (!page) {
     console.error("Can not get page or open new one");
@@ -60,15 +108,6 @@ const firstPage = async (browser) => {
   //     if (request.resourceType() === "image") request.abort();
   //     else request.continue();
   //   });
-  await page.setRequestInterception(true);
-  page.on("request", (interceptedRequest) => {
-    if (
-      interceptedRequest.url().endsWith(".png") ||
-      interceptedRequest.url().endsWith(".jpg")
-    )
-      interceptedRequest.abort();
-    else interceptedRequest.continue();
-  });
 
   return page;
 };
@@ -146,6 +185,7 @@ module.exports = {
   getBrowser,
   closeBrowser,
   firstPage,
+  secordPageClear,
   newPage,
   selectorCount,
   selectorsCountMax,

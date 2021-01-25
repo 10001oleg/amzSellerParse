@@ -2,13 +2,18 @@
 
 require("dotenv").config();
 
+const { exec } = require("child_process");
+// const chromium = require("chrome-aws-lambda");
+
+if (!process.env.S3_BUCKET) {
+  throw Error("Enviroment S3_BUCKET not defined");
+}
+
 if (process.env["AWS_PROFILE"]) {
   console.log("Using AWS profile: ", process.env["AWS_PROFILE"]);
 }
-
-const { exec } = require("child_process");
-// const chromium = require("chrome-aws-lambda");
-// const AWS = require("aws-sdk");
+const AWS = require("aws-sdk");
+const s3 = new AWS.S3();
 // const fs = require("fs");
 
 const mydb = require("./lib/mydb");
@@ -61,12 +66,22 @@ const sqlStoreGet = `
 SELECT *
 FROM "store"
 WHERE true
--- AND "_date_updated" < CURRENT_TIMESTAMP - INTERVAL '1 HOUR'
-ORDER BY "_date_updated" ASC
-LIMIT 1
+  AND NOT "data" ? 'disabled'
+  AND "_date_updated" < CURRENT_TIMESTAMP - INTERVAL '1 HOUR'
+ORDER BY "_date_updated" ASC NULLS FIRST
+LIMIT 10
+`;
+const sqlStoreUpdateDateUpdated = `
+UPDATE "store"
+SET "_date_updated" = CURRENT_TIMESTAMP
+WHERE "store_id" = $1
 `;
 const sqlProductsSelectByAsinAndStore = `
-SELECT product_id, asin
+SELECT
+  product_id,
+  asin,
+  data->'imgSrc' as "img_src",
+  data->'imgS3' as "img_s3"
 FROM product
 WHERE true
   AND "store_id" = $1
@@ -118,6 +133,7 @@ const worker = async (opts) => {
   const {
     rows: [store],
   } = await client.query(sqlStoreGet);
+
   if (!store) {
     console.log("%s No found store for worker", logPrefix);
     // prettier-ignore
@@ -131,8 +147,10 @@ const worker = async (opts) => {
     store.seller_id,
     store.url
   );
+  await client.query(sqlStoreUpdateDateUpdated, [store.store_id]);
   const browser = await pp.getBrowser();
   const page = await pp.firstPage(browser);
+  // const pageClearFilter = await pp.secordPageClear(browser);
   let flagNextPage = false;
   const response = await page.goto(store.url, {
     waitUntil: "domcontentloaded",
@@ -157,7 +175,9 @@ const worker = async (opts) => {
   const allProducts = [];
   // flagNextPage = true;
   // allProducts.push(...JSON.parse(fs.readFileSync("allProducts.json")));
+  let pageNumber = 0;
   while (!flagNextPage) {
+    pageNumber++;
     // in PP: sels=Array.from(document.querySelectorAll(cssProductRow))
     // ((sels)=>sels.map(div=>{...}))(sels);
     // document.querySelectorAll(cssProductRow);
@@ -222,6 +242,11 @@ const worker = async (opts) => {
       cssProductRow + " li.a-last",
       (sels) => sels && sels.length > 0
     );
+    if (!liLastOk && pageNumber == 1 && allProducts.length > 0) {
+      // only first page exists
+      flagNextPage = true;
+      break;
+    }
     if (!liLastOk) {
       console.error("%s Button (list) 'Next ->' not found!", logPrefix);
       throw Error("FAIL");
@@ -271,8 +296,107 @@ const worker = async (opts) => {
         .filter((p) => p.asin == row.asin)
         .map((p) => {
           p.product_id = row.product_id;
+          p.old_img_src = row.img_src;
+          p.old_img_s3 = row.img_s3;
         });
     });
+  }
+  for (const prod of prettyProducts) {
+    const { old_img_src, old_img_s3 } = prod;
+    delete prod.old_img_src;
+    delete prod.old_img_s3;
+
+    if (old_img_src) {
+      if (old_img_s3 && old_img_s3.origSrc == prod.imgSrc) {
+        console.log("%s imgSrc orig not changes, continue", logPrefix);
+        continue;
+      }
+    }
+
+    const href = prod.imgSrc.replace(/\._[^.]*_(\.[a-z]+)$/i, "$1");
+    const pageClearFilter = await pp.secordPageClear(browser);
+    const data = await new Promise((resolve, reject) => {
+      let interval = setTimeout(reject, 10 * 1e3);
+      pageClearFilter.on("response", async (response) => {
+        const pageUrl = response.url();
+        const pageHeaders = response.headers();
+        const contentType =
+          pageHeaders["content-type"] ||
+          pageHeaders["Content-Type"] ||
+          undefined;
+
+        const pageType = response.request().resourceType();
+        console.log(
+          "%s Got resource type '%s' from '%s'",
+          logPrefix,
+          response.request().resourceType(),
+          pageUrl
+        );
+        if (pageType === "image" || pageUrl === href) {
+          response.buffer().then((buffer) => {
+            if (interval) {
+              clearInterval(interval);
+              interval = undefined;
+            }
+            resolve({ buffer, contentType });
+          });
+          return;
+        }
+        // resolve(undefined);
+      });
+      pageClearFilter.goto(href);
+    });
+    console.log(
+      "%s waiting 30sec to close second page, data = ",
+      logPrefix,
+      data && data.contentType
+    );
+    // await new Promise((res) => setTimeout(res, 30 * 1e3));
+    await pageClearFilter.close();
+
+    if (data && data.buffer) {
+      const { buffer, contentType } = data;
+      if (Buffer.isBuffer(buffer)) {
+        let s3key = prod.asin;
+        const extMatches = href.match(/\.([a-z]+)$/i);
+        if (extMatches && extMatches[1]) s3key = `${s3key}.${extMatches[1]}`;
+        console.log("%s Start upload as %s", logPrefix, s3key);
+        const s3response = await s3
+          .upload({
+            Bucket: process.env.S3_BUCKET,
+            Key: s3key,
+            Body: buffer,
+            ACL: "public-read",
+            ...(contentType
+              ? {
+                  Metadata: {
+                    "Content-Type": contentType,
+                  },
+                }
+              : {}),
+          })
+          .promise();
+        console.log("%s S3 uploaded.", logPrefix, s3response && s3response.Key);
+        if (
+          s3response &&
+          s3response.Location &&
+          s3response.Bucket &&
+          s3response.Key
+        ) {
+          prod.imgS3 = {
+            origSrc: prod.imgSrc,
+            location: s3response.Location,
+            bucket: s3response.Bucket,
+            key: s3response.Key,
+          };
+          prod.imgSrc = s3response.Location;
+        }
+      } else {
+        console.error("%s FAILED FAILED 'buffer' is not Buffer", logPrefix);
+      }
+    } else {
+      console.error("%s 'buffer' is undefined", logPrefix);
+    }
   }
   if (prettyProducts.some((p) => p.product_id)) {
     const prodArray = prettyProducts
@@ -333,36 +457,43 @@ const main = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} main`.trim();
   console.log("%s Main start", logPrefix);
   await mydb.updatePgConnection(opts);
-  client = await mydb.getClient();
-  let transactionBegin = false;
-  try {
-    await client.query("BEGIN");
-    transactionBegin = true;
-    // BEGIN block from main() loop
-    await worker({ ...opts, client, logPrefix });
-    // END block from main() loop
-    console.log("TRY/CATCH. block. PG commit.");
-    await client.query("COMMIT");
-    transactionBegin = false;
-  } catch (err) {
-    if (transactionBegin) {
-      console.log("TRY/CATCH. catch. PG commit.");
+
+  while (!flagNeedShutdown) {
+    client = await mydb.getClient();
+    let transactionBegin = false;
+    try {
+      await client.query("BEGIN");
+      transactionBegin = true;
+      // BEGIN block from main() loop
+      await worker({ ...opts, client, logPrefix });
+      // END block from main() loop
+      console.log("TRY/CATCH. block. PG commit.");
       await client.query("COMMIT");
       transactionBegin = false;
+    } catch (err) {
+      if (transactionBegin) {
+        console.log("TRY/CATCH. catch. PG commit.");
+        if (client) await client.query("ROLLBACK");
+        transactionBegin = false;
+      }
+      console.error("Got error: %s\nStack: %s", err.message, err.stack);
+      console.log("delay 30.0 seconds for display error message... ");
+      await new Promise((res) => setTimeout(res, 30 * 1e3));
+      // Force exit if catch in DB query
+      if (process.env.DEBUG) return;
+    } finally {
+      if (transactionBegin) {
+        console.log("TRY/CATCH. finally. PG commit.");
+        if (client) await client.query("COMMIT");
+        transactionBegin = false;
+      }
+      console.log("TRY/CATCH: client release at now");
+      await client.release();
     }
-    console.error("Got error: %s\nStack: %s", err.message, err.stack);
-    console.log("delay 30.0 seconds for display error message... ");
-    await new Promise((res) => setTimeout(res, 30 * 1e3));
-  } finally {
-    if (transactionBegin) {
-      console.log("TRY/CATCH. finally. PG commit.");
-      await client.query("COMMIT");
-      transactionBegin = false;
-    }
-    console.log("TRY/CATCH: client release at now");
-    await client.release();
+    client = undefined;
+    console.log("WAIT WAIT WAIT");
+    await new Promise((res) => setTimeout(res, 3 * 1e3));
   }
-  client = undefined;
   if (flagNeedShutdown) {
     exec("sudo shutdown -P now");
     console.error("\n\n\n\nTHROTTLING !!! SHUTDOWN -P now.\n\n\n\n");
