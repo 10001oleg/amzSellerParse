@@ -1,4 +1,5 @@
 "use strict";
+const util = require("util");
 
 const apiRates = {
   UPS: require("./carrier/UPS/rates"),
@@ -341,7 +342,13 @@ const generateOneOrder = async (
     );
 
   const { rows: rowsOrderInsert } = await client.query(sqlGnOrderInsert, [
-    "222-yy",
+    util.format(
+      "11%s-%s%s%s****-*******",
+      Math.trunc(Math.random() * 4) + 1,
+      Math.trunc(Math.random() * 9) + 1,
+      Math.trunc(Math.random() * 10),
+      Math.trunc(Math.random() * 10)
+    ),
     filter && filter.orderDate ? new Date(filter.orderDate) : null, //new Date(),
     orderObj.store_id,
     JSON.stringify(items),
