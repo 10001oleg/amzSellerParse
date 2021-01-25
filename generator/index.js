@@ -85,7 +85,7 @@ const cbCreateNewOrders = async (opts) => {
         undefined,
         { store_id: storeData.store_id, orderDate: +curDate + secOfHour * 1e3 }
       );
-      console.log(res.order_date);
+      console.log(res && res.order_date);
     }
   }
 };

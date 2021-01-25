@@ -25,19 +25,60 @@ AND NOT gn_order_id = $2
 ORDER BY "order_date" ASC
 LIMIT 1
 `;
+
+const packObjectNormalize = (p) =>
+  !p.width || !p.height || !p.length || !p.weight
+    ? p
+    : {
+        width: +p.width.toFixed(2),
+        height: +p.height.toFixed(2),
+        length: +p.length.toFixed(2),
+        weight: +p.weight.toFixed(2),
+      };
+
 const genDashboardFromOrders = (orders) =>
   orders.map((row) => ({
     order_id: row.gn_order_id,
     channel_order_id: row.channel_order_id,
     order_date: row.order_date.toISOString(),
-    postalCode: row.ship_address.postalCode,
     seller: {
       id: row.store && row.store.store_id ? row.store.store_id : null,
       url: row.store && row.store.data ? row.store.data.sellerPage : null,
       name: row.store && row.store.name ? row.store.name : null,
     },
+    wh: {
+      code: row.wh && row.wh.code ? row.wh.code : null,
+      PostalCode:
+        row.wh && row.wh.ship_address && row.wh.ship_address.PostalCode
+          ? row.wh.ship_address.PostalCode
+          : null,
+      StateOrRegion:
+        row.wh && row.wh.ship_address && row.wh.ship_address.StateOrRegion
+          ? row.wh.ship_address.StateOrRegion
+          : null,
+      City:
+        row.wh && row.wh.ship_address && row.wh.ship_address.City
+          ? row.wh.ship_address.City
+          : null,
+    },
+    ship_address: {
+      PostalCode:
+        row.ship_address && row.ship_address.PostalCode
+          ? row.ship_address.PostalCode
+          : null,
+      StateOrRegion:
+        row.ship_address && row.ship_address.StateOrRegion
+          ? row.ship_address.StateOrRegion
+          : null,
+      City:
+        row.ship_address && row.ship_address.City
+          ? row.ship_address.City
+          : null,
+    },
     items: row.items.map((item) => ({
       product_id: item.product_id,
+      asin:
+        item.productObj && item.productObj.asin ? item.productObj.asin : null,
       qty: item.qty,
       price:
         item.productObj && item.productObj.price
@@ -49,7 +90,15 @@ const genDashboardFromOrders = (orders) =>
           : null,
       title:
         item.productObj && item.productObj.title ? item.productObj.title : null,
+      pack:
+        item.productObj && item.productObj.data && item.productObj.data.pack
+          ? packObjectNormalize(item.productObj.data.pack)
+          : null,
     })),
+    carrier: {
+      name: row.data && row.data.carrier_type ? row.data.carrier_type : null,
+      rate: row.data && row.data.carrier_total ? row.data.carrier_total : null,
+    },
   }));
 
 const postToAllConnections = async (opts, messageObj) => {

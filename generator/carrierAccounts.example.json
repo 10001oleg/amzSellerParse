@@ -1,0 +1,22 @@
+[
+  {
+    "carrier_type": "UPS",
+    "cred": {
+      "username": "muUsername",
+      "password": "myPassword",
+      "accountNumber": "9V4A76",
+      "transactionSrc": "asdasdasd",
+      "accessLicenseNumber": "any"
+    }
+  },
+  {
+    "carrier_type": "FEDEX",
+    "cred": {
+      "key": "myKey",
+      "password": "myPassword",
+      "environment": "live",
+      "meter_number": "number",
+      "account_number": "number"
+    }
+  }
+]

@@ -1,5 +1,15 @@
 "use strict";
 
+const apiRates = {
+  UPS: require("./carrier/UPS/rates"),
+  JFEDEX: require("./carrier/JFEDEX/rates"),
+};
+
+const fs = require("fs");
+const carrierAccounts = JSON.parse(
+  fs.readFileSync(__dirname + "/carrierAccounts.json")
+);
+
 const sqlProductRnd = `
 SELECT
   "product_id",
@@ -10,6 +20,7 @@ WHERE true
   AND "star" > 0
   AND "price" > 0
   AND NOT "is_deleted"
+  AND "data" ? 'pack'
   AND CASE 
     WHEN $1::integer IS NULL THEN true
     ELSE "store_id" = $1::integer
@@ -67,12 +78,57 @@ const defOrderRandom = {
   ],
 };
 
+const sqlRandomAddress = `
+SELECT *
+FROM "address"
+ORDER BY RANDOM() 
+LIMIT 10
+`;
+const sqlAddressUseCountIncrement = `
+UPDATE "address"
+SET "use_count" ="use_count" +1
+WHERE "wh_order_id" = $1::integer
+`;
+
+const warehouses = [
+  {
+    code: "OC",
+    probability: 60,
+    ship_address: {
+      CountryCode: "US",
+      PostalCode: "90058-3453",
+      StateOrRegion: "CA",
+      City: "Vernon",
+      AddressType: "Commercial",
+    },
+  },
+  {
+    code: "GA1",
+    probability: 40,
+    ship_address: {
+      CountryCode: "US",
+      PostalCode: "30071",
+      StateOrRegion: "GA",
+      City: "NORCROSS",
+      AddressType: "Commercial",
+    },
+  },
+];
 const generateOneOrder = async (
   opts,
   genQtyParam = defOrderRandom,
   filter = {}
 ) => {
   const logPrefix = `${opts.logPrefix || ""} generateOneOrder`.trim();
+  const optsStack = {
+    ...opts,
+    logPrefix,
+    client: {
+      query: () => {
+        throw Error("NEED TO DELETE CODE");
+      },
+    },
+  };
   const client = opts.client;
   if (!client) {
     throw Error("opts.client required!");
@@ -125,14 +181,170 @@ const generateOneOrder = async (
       return undefined;
     }, undefined),
   };
+
+  // generate randon buyer address
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { rows } = await client.query(sqlRandomAddress);
+    const filterAddresses = rows.filter(
+      ({ ship_address }) =>
+        ship_address &&
+        ship_address.StateOrRegion &&
+        typeof ship_address.StateOrRegion == "string" &&
+        ship_address.StateOrRegion.length == 2 &&
+        ship_address.PostalCode
+    );
+    if (filterAddresses.length == 0) continue;
+    const { ship_address, wh_order_id } = filterAddresses[0];
+    orderObj.ship_address = ship_address;
+    await client.query(sqlAddressUseCountIncrement, [wh_order_id]); // update increment "use_count field"
+    break;
+  }
+  // const selectedWH = randomWeighted(
+  //   warehouses.map((v) => ({ w: v.probability, v }))
+  // );
+  // if (!selectedWH) throw Error("Can not selection ");
+  // orderObj.whObj = { ...selectedWH.ship_address, code: selectedWH.code };
+
+  const packages = items.flatMap((e) => {
+    const res = [];
+    for (let i = 0; i < +e.qty; i++) {
+      res.push({
+        weight: e.productObj.data.pack.weight,
+        dimensions: {
+          width: e.productObj.data.pack.width,
+          height: e.productObj.data.pack.height,
+          length: e.productObj.data.pack.length,
+        },
+      });
+    }
+    return res;
+  });
+  console.log("Order packages: ", packages);
+  const objRequest = {
+    dropoffType: "REGULAR_PICKUP",
+    packagingType: "YOUR_PACKAGING", // or FEDEX_ENVELOPE default YOUR_PACKAGING
+    shippingChargesPayment: "SENDER", // or THIRD_PARTY (not use)
+    shipper: { contact: {}, address: {} },
+    recipient: { contact: {}, address: {} },
+    packages,
+  };
+  // prettier-ignore
+  {
+    if (orderObj.ship_address.CountryCode)   objRequest.recipient.address.countryCode = orderObj.ship_address.CountryCode;
+    if (orderObj.ship_address.PostalCode)    objRequest.recipient.address.postalCode =  orderObj.ship_address.PostalCode;
+    if (orderObj.ship_address.StateOrRegion) objRequest.recipient.address.stateOrProvinceCode = orderObj.ship_address.StateOrRegion;
+    if (orderObj.ship_address.City)          objRequest.recipient.address.city =        orderObj.ship_address.City;
+    if (orderObj.ship_address.AddressLine1)  objRequest.recipient.address.streetLine1 = orderObj.ship_address.AddressLine1;
+    if (orderObj.ship_address.AddressLine2)  objRequest.recipient.address.streetLine2 = orderObj.ship_address.AddressLine2;
+    if (orderObj.ship_address.AddressLine3)  objRequest.recipient.address.streetLine3 = orderObj.ship_address.AddressLine3;
+    if (orderObj.ship_address.AddressType)   {
+      objRequest.recipient.address.residential = orderObj.ship_address.AddressType.match(/Residential/i)?true:false;
+    } else {
+      objRequest.recipient.address.residential = true;
+    }
+  }
+
+  //determine lower price
+  const whRates = [];
+  for (const whObj of warehouses) {
+    const carrierRates = await Promise.all(
+      carrierAccounts.map(async (carrierData) => {
+        const { carrier_type } = carrierData;
+        carrierData.carrier_id = -1;
+        const myRequest = JSON.parse(JSON.stringify(objRequest));
+        // prettier-ignore
+        {
+          if (whObj.ship_address.CountryCode)   myRequest.shipper.address.countryCode = whObj.ship_address.CountryCode;
+          if (whObj.ship_address.PostalCode)    myRequest.shipper.address.postalCode =  whObj.ship_address.PostalCode;
+          if (whObj.ship_address.StateOrRegion) myRequest.shipper.address.stateOrProvinceCode = whObj.ship_address.StateOrRegion;
+          if (whObj.ship_address.City)          myRequest.shipper.address.city =        whObj.ship_address.City;
+          if (whObj.ship_address.AddressLine1)  myRequest.shipper.address.streetLine1 = whObj.ship_address.AddressLine1;
+          if (whObj.ship_address.AddressLine2)  myRequest.shipper.address.streetLine2 = whObj.ship_address.AddressLine2;
+          if (whObj.ship_address.AddressLine3)  myRequest.shipper.address.streetLine3 = whObj.ship_address.AddressLine3;
+          if (whObj.ship_address.AddressType)   {
+            myRequest.shipper.address.residential = whObj.ship_address.AddressType.match(/Residential/i)?true:false;
+          } else {
+            myRequest.shipper.address.residential = true;
+          }
+        }
+
+        const rates = await apiRates[carrier_type].handler(
+          { ...optsStack, carrierData },
+          undefined,
+          myRequest
+        );
+
+        const minRate = rates
+          .filter((e) => e && e.ServiceType && e.ServiceType.match(/GROUND/i))
+          .reduce((minRate, rate) => {
+            if (!rate || !rate.TotalNetChargeWithDutiesAndTaxes) return minRate;
+            const total = +rate.TotalNetChargeWithDutiesAndTaxes;
+            if (!minRate || !minRate.total || minRate.total > total) {
+              return {
+                total,
+                rate,
+              };
+            }
+            return minRate;
+          }, {});
+
+        return {
+          carrier_type: carrierData.carrier_type,
+          rate: minRate ? minRate.rate : undefined,
+          total: minRate ? minRate.total : undefined,
+        };
+      })
+    );
+
+    const minWhRate = carrierRates.reduce(
+      (acc, rate) =>
+        !acc || !acc.total || acc.total > rate.total ? rate : acc,
+      undefined
+    );
+    whRates.push({
+      whObj,
+      carrier_type: minWhRate ? minWhRate.carrier_type : undefined,
+      rate: minWhRate ? minWhRate.rate : undefined,
+      total: minWhRate ? minWhRate.total : undefined,
+    });
+  }
+  console.log(whRates);
+
+  const resWhAndRates = whRates.reduce((acc, whRate) => {
+    if (!whRate || !whRate.whObj || !whRate.total) return acc;
+    if (!acc || !acc.total) return whRate;
+    if (acc.total > whRate.total) return whRate;
+    return acc;
+  }, undefined);
+  if (!resWhAndRates || !resWhAndRates.whObj || !resWhAndRates.total) {
+    console.error("%s can not be determine optimate WH", logPrefix);
+    return;
+  }
+  orderObj.whObj = resWhAndRates.whObj;
+  orderObj.rates = {
+    total: resWhAndRates.total,
+    carrier_type: resWhAndRates.carrier_type,
+    carrier_rate: resWhAndRates.rate,
+  };
+  //workaround JFEDEX
+  if (orderObj.rates && orderObj.rates.carrier_type)
+    orderObj.rates.carrier_type = orderObj.rates.carrier_type.replace(
+      /^JFEDEX/,
+      "FEDEX"
+    );
+
   const { rows: rowsOrderInsert } = await client.query(sqlGnOrderInsert, [
-    "222-xx",
+    "222-yy",
     filter && filter.orderDate ? new Date(filter.orderDate) : null, //new Date(),
     orderObj.store_id,
     JSON.stringify(items),
-    JSON.stringify({ countryCode: "XX" }), // ship_address
-    JSON.stringify({ countryCode: "XX", code: "ZZZ" }), // whObj
-    "{}",
+    JSON.stringify(orderObj.ship_address), // ship_address
+    JSON.stringify(orderObj.whObj), // whObj
+    JSON.stringify({
+      carrier_type: orderObj.rates.carrier_type,
+      carrier_total: orderObj.rates.total,
+      carrier_rates: orderObj.rates.carrier_rate,
+    }),
   ]);
   console.log("%s OrderInserted: ", logPrefix, rowsOrderInsert);
   return rowsOrderInsert[0];
