@@ -194,12 +194,22 @@ const worker = async (opts) => {
             const titleBlock = div.querySelector("h2 a span.a-text-normal");
             if (titleBlock && titleBlock.innerText)
               res.title = titleBlock.innerText;
-          } // star
+          }
+          // star
           {
             const starBlock = div.querySelector("i.a-icon-star-small");
             if (starBlock && starBlock.innerText)
               res.star = starBlock.innerText;
-          } // price
+          }
+          // review
+          {
+            const reviewBlock = div.querySelector(
+              "a[href*='#customerReview'] span"
+            );
+            if (reviewBlock && reviewBlock.innerText)
+              res.review = reviewBlock.innerText;
+          }
+          // price
           {
             const priceBlock = div.querySelector(
               "span.a-price span.a-offscreen"
@@ -277,6 +287,9 @@ const worker = async (opts) => {
         e.starValue = +matches[1];
         e.starMax = +matches[2];
       }
+    }
+    if (e.review && +e.review > 0) {
+      e.reviewValue = +e.review;
     }
     if (e.price && typeof e.price == "string") {
       const matches = e.price.match(/\$\s*([\d.]+)/);

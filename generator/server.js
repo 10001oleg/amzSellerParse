@@ -94,6 +94,18 @@ const genDashboardFromOrders = (orders) =>
         item.productObj && item.productObj.data && item.productObj.data.pack
           ? packObjectNormalize(item.productObj.data.pack)
           : null,
+      star:
+        item.productObj &&
+        item.productObj.data &&
+        item.productObj.data.starValue
+          ? +item.productObj.data.starValue
+          : null,
+      review:
+        item.productObj &&
+        item.productObj.data &&
+        item.productObj.data.reviewValue
+          ? +item.productObj.data.reviewValue
+          : null,
     })),
     carrier: {
       name: row.data && row.data.carrier_type ? row.data.carrier_type : null,
