@@ -154,6 +154,7 @@ const workerAmzProductUpdater = async (opts) => {
             Array.isArray(attrSet.PackageDimensions)
               ? attrSet.PackageDimensions[0]
               : attrSet.PackageDimensions;
+          if (!itemDim) return undefined;
           const keys = ["Width", "Height", "Length", "Weight"];
           for (const key of keys) {
             if (!itemDim[key]) {
