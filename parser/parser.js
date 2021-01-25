@@ -288,8 +288,8 @@ const worker = async (opts) => {
         e.starMax = +matches[2];
       }
     }
-    if (e.review && +e.review > 0) {
-      e.reviewValue = +e.review;
+    if (e.review && +e.review.replace(",", "") > 0) {
+      e.reviewValue = +e.review.replace(",", "");
     }
     if (e.price && typeof e.price == "string") {
       const matches = e.price.match(/\$\s*([\d.]+)/);
