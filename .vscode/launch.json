@@ -10,6 +10,23 @@
       "name": "Launch Program",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/index.js"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch TEST",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/generator/index-test.js",
+      "env": {
+        "NODE_OPTIONS": "--stack-trace-limit=100"
+      }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch workerParser",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/parser/workerProduct.js"
     }
   ]
 }

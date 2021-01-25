@@ -20,9 +20,7 @@
   "dependencies": {
     "aws-sdk": "^2.753.0",
     "bluebird": "^3.7.2",
-    "cheerio": "^1.0.0-rc.3",
     "chrome-aws-lambda": "^5.5.0",
-    "crawler": "^1.2.2",
     "csv": "^5.3.2",
     "csvtojson": "^2.0.10",
     "dotenv": "^8.2.0",

@@ -12,7 +12,7 @@ const main = async () => {
   const res = await genOrder.generateOneOrder(opts, undefined, {});
   console.log(res);
 };
-// main();
+main();
 
 const server = require(__dirname + "/server");
 server.serverWorker({ client: mydb });

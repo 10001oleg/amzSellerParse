@@ -18,6 +18,10 @@ Metadata:
     Name: adh-wss
 
 Resources:
+  s3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicRead
   wssApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -222,3 +226,5 @@ Outputs:
   WebSocketURI:
     Description: "The WSS Protocol URI to connect to"
     Value: !Sub wss://${wssApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+  s3Bucket:
+    Value: !Ref s3Bucket
