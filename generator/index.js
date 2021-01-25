@@ -6,6 +6,7 @@ const mydb = require("./lib/mydb");
 const sqlStoreSelect = `
 SELECT *
 FROM "store"
+WHERE NOT "data" ? 'disabled'
 `;
 const orderHistogram = [
   { h: 0, v: 8484 },
@@ -85,7 +86,10 @@ const cbCreateNewOrders = async (opts) => {
         undefined,
         { store_id: storeData.store_id, orderDate: +curDate + secOfHour * 1e3 }
       );
-      console.log(res && res.order_date);
+      if (!(res && res.order_date)) {
+        console.log("%s Failed create new order...", logPrefix);
+      }
+      console.log("%s generateOneOrder: ", logPrefix, res && res.order_date);
     }
   }
 };

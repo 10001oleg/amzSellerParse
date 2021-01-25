@@ -137,7 +137,14 @@ const generateOneOrder = async (
   const { rows: dbProducts } = await client.query(sqlProductRnd, [
     filter && filter.store_id ? filter.store_id : null,
   ]);
-  if (dbProducts.length < 1) return;
+  if (dbProducts.length < 1) {
+    console.log(
+      "%s Nothing product to generate orders, store #%s",
+      logPrefix,
+      filter.store_id
+    );
+    return;
+  }
   const starValueSum = dbProducts.reduce(
     (acc, e) => (acc || 0) + (+e.star || 0),
     0
