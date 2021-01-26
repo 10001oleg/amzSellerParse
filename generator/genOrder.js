@@ -14,7 +14,8 @@ const carrierAccounts = JSON.parse(
 const sqlProductRnd = `
 SELECT
   "product_id",
-  "star"
+  "star",
+  "data"->'pack' as pack
   -- ,SUM(star) OVER(rows between unbounded preceding and current row) as star_paging
 FROM "product"
 WHERE true
@@ -49,6 +50,11 @@ VALUES (
   $3,$4,$5,$6,$7
 )
 RETURNING "gn_order_id"
+`;
+const sqlParamSelectOrderProduct = `
+SELECT *
+FROM "param"
+WHERE "v"->>'type' = 'orderProduct'
 `;
 
 const randomWeighted = (arr) => {
@@ -134,10 +140,52 @@ const generateOneOrder = async (
   if (!client) {
     throw Error("opts.client required!");
   }
+  const { rows: params } = await client.query(sqlParamSelectOrderProduct);
 
-  const { rows: dbProducts } = await client.query(sqlProductRnd, [
+  const { rows: dirtyProducts } = await client.query(sqlProductRnd, [
     filter && filter.store_id ? filter.store_id : null,
   ]);
+
+  const dbProducts = dirtyProducts.filter((prod) => {
+    const pack = prod.pack;
+    for (const { v } of params) {
+      if ("weightMin" in v || "weightMax" in v) {
+        if (!pack) return false;
+        if (!pack.weight) {
+          return false;
+        }
+        if ("weightMin" in v && v.weightMin > pack.weight) {
+          return false;
+        }
+        if ("weightMax" in v && v.weightMax < pack.weight) {
+          return false;
+        }
+      }
+      if ("dimMin" in v || "dimMax" in v) {
+        if (!pack) return false;
+        if (!pack.height || !pack.width || !pack.length) {
+          return false;
+        }
+        if (
+          "dimMin" in v &&
+          (v.dimMin > pack.height ||
+            v.dimMin > pack.width ||
+            v.dimMin > pack.length)
+        ) {
+          return false;
+        }
+        if (
+          "dimMax" in v &&
+          (v.dimMax < pack.height ||
+            v.dimMax < pack.width ||
+            v.dimMax < pack.length)
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
+  });
   if (dbProducts.length < 1) {
     console.log(
       "%s Nothing product to generate orders, store #%s",
