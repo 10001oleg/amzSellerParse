@@ -106,6 +106,10 @@ const genDashboardFromOrders = (orders) =>
         item.productObj.data.reviewValue
           ? +item.productObj.data.reviewValue
           : null,
+      ranks:
+        item.productObj && item.productObj.data && item.productObj.data.ranks
+          ? item.productObj.data.ranks
+          : null,
     })),
     carrier: {
       name: row.data && row.data.carrier_type ? row.data.carrier_type : null,

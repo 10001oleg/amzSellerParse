@@ -32,6 +32,7 @@ const sqlAmzProductSelectForUpdate = `
 SELECT *
 FROM "product"
 WHERE "mws_product_lastupdate" IS NULL OR "mws_product_lastupdate" < CURRENT_TIMESTAMP - INTERVAL '1 HOUR' -- TODO increase interval
+--WHERE "data" ? 'pack' -- FOR DEBUG
 ORDER BY mws_product_lastupdate ASC NULLS FIRST
 LIMIT 1
 FOR UPDATE SKIP LOCKED
@@ -49,7 +50,162 @@ SET
   "mws_product_lastupdate" = CURRENT_TIMESTAMP
 WHERE "asin" = $1
 `;
+const sqlAmzCategoriesByIds = `
+SELECT "category_id", "name"
+FROM "amazon_category"
+WHERE "category_id" = ANY ($1::text[])
+`;
 
+const sqlAmzCategoryInsertOrUpdate = `
+INSERT INTO "amazon_category" as ac (
+  "category_id",
+  "name",
+  "parent_id",
+  "data",
+  "lastupdate"
+)
+SELECT
+  z->>'category_id',
+  z->>'name',
+  z->>'parent_id',
+  z->'data',
+  CURRENT_TIMESTAMP
+FROM jsonb_array_elements($1::jsonb) z
+ON CONFLICT ("category_id") DO UPDATE
+SET
+  "name" = excluded."name",
+  "parent_id" = excluded."parent_id",
+  "data" = ac."data" || excluded."data",
+  "lastupdate" = CURRENT_TIMESTAMP
+WHERE NOT (
+   COALESCE(ac."name",'') <> excluded."name" AND
+   COALESCE(ac."parent_id",'') <> excluded."parent_id" AND
+   excluded."data" = '{}'::jsonb
+)
+RETURNING "category_id", "name", "parent_id"
+
+`;
+
+const amzUpdateCategoriesByProductASIN = async (
+  opts,
+  cred,
+  asin,
+  categories = []
+) => {
+  const logPrefix = `${opts.logPrefix || ""} workerAmzProductUpdater`.trim();
+  const optsStack = { ...opts, logPrefix };
+  const client = opts.client;
+  try {
+    const resRequestReport = await requestAmazon(
+      optsStack,
+      { cred },
+      { path: "/Products/2011-10-01" },
+      {
+        Action: "GetProductCategoriesForASIN",
+        ASIN: asin,
+      }
+    );
+    if (resRequestReport && resRequestReport.statusMessage == "Nothing Data") {
+      console.log("%s Nothing to response. Increase wait delay", logPrefix);
+      return;
+    }
+    if (
+      !resRequestReport ||
+      !resRequestReport.body ||
+      !resRequestReport.body.GetProductCategoriesForASINResponse ||
+      !resRequestReport.body.GetProductCategoriesForASINResponse
+        .GetProductCategoriesForASINResult
+    ) {
+      console.log("%s Failed request...", logPrefix);
+      return;
+    }
+    const tmpResponses =
+      resRequestReport.body.GetProductCategoriesForASINResponse
+        .GetProductCategoriesForASINResult;
+    const responses = mFunc.forceArray(
+      tmpResponses.Self ? tmpResponses.Self : tmpResponses
+    );
+    const category_list = []; // {category_id, name, parent_id, data}
+
+    console.log("product %s categories: ", asin, JSON.stringify(responses));
+    for (const startTreeItem of responses) {
+      let item = startTreeItem;
+      for (let depth = 0; depth < 20; depth++) {
+        if (!item) break;
+        const Parent = item.Parent;
+        if (
+          !category_list.some((e) => e.category_id == item.ProductCategoryId)
+        ) {
+          category_list.push({
+            category_id: item.ProductCategoryId,
+            name: item.ProductCategoryName,
+            parent_id:
+              Parent && Parent.ProductCategoryId
+                ? Parent.ProductCategoryId
+                : null,
+            data: item.Parent ? { Parent: item.Parent } : {},
+          });
+        }
+        if (!Parent) break;
+        item = Parent;
+      }
+    }
+    const response = {};
+    if (category_list.length > 0) {
+      const categoriesDbUpdates = category_list.filter((catData) => {
+        const fltList = categories.filter(
+          (e) => e.category_id == catData.category_id
+        );
+        if (fltList.length == 0) return true;
+        if (
+          fltList[0] &&
+          fltList[0].name &&
+          fltList[0].name == catData.name &&
+          fltList[0].parent_id &&
+          fltList[0].parent_id == catData.parent_id &&
+          true
+        )
+          return false;
+        return true;
+      });
+      if (categoriesDbUpdates.length > 0) {
+        const { rows } = await client.query(sqlAmzCategoryInsertOrUpdate, [
+          JSON.stringify(categories),
+        ]);
+        response.categoryListUpdates = rows;
+      }
+    }
+    response.categories = responses
+      .map((e) => e.ProductCategoryId)
+      .filter((e) => e);
+
+    return response;
+  } catch (err) {
+    console.log("Error: %s\nSTack: %s", err.message, err.stack);
+    throw err;
+  }
+};
+
+const updateCategoriesCache = (categories, categoriesUpdates) => {
+  for (const updates of categoriesUpdates) {
+    const candidates = categories.filter(
+      (e) => e.category_id == updates.category_id
+    );
+    let needAdd = true;
+    candidates.map((e) => {
+      needAdd = false;
+      e.name = updates.name;
+      e.parent_id = updates.parent_id;
+      e.data = { ...(e.data || {}), ...(updates.data || {}) };
+    });
+    if (needAdd) {
+      // console.log("Insert category id into cache %s", updates.category_id);
+      categories.push(updates);
+    }
+  }
+};
+
+// GetProductCategoriesForASINResult
 const workerAmzProductUpdater = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} workerAmzProductUpdater`.trim();
   console.log("%s start", logPrefix);
@@ -57,17 +213,18 @@ const workerAmzProductUpdater = async (opts) => {
   for (;;) {
     console.log("%s for loop", logPrefix);
     const optsStack = { ...opts, logPrefix };
+    const { rows } = await mydb.query(sqlAmzProductSelectForUpdate);
+    if (!(rows.length > 0)) {
+      console.log("%s nothing product for update. wait 30sec", logPrefix);
+      await new Promise((res) => setTimeout(res, 30e3));
+      return;
+    }
+
     await mydb.trxWrap(optsStack, async (client) => {
       console.log("%s trxWrap", logPrefix);
-      const { rows } = await client.query(sqlAmzProductSelectForUpdate);
-      if (!(rows.length > 0)) {
-        console.log("%s nothing product for update. wait 30sec", logPrefix);
-        await new Promise((res) => setTimeout(res, 30e3));
-        return;
-      }
       const cred = await getCred(optsStack);
       const asins = [rows[0].asin];
-      const { product_id } = rows[0];
+      const { product_id, data: productData } = rows[0];
       await client.query(sqlAmzProductUpdateLastUpdate, [product_id]);
 
       const resRequestReport = await requestAmazon(
@@ -95,7 +252,7 @@ const workerAmzProductUpdater = async (opts) => {
         resRequestReport.body.GetMatchingProductForIdResponse
           .GetMatchingProductForIdResult
       );
-      console.log(responses);
+      // console.log(responses);
       const asinsData = responses.map((response) => {
         const { Id, status } = response;
         if (status !== "Success") {
@@ -181,22 +338,97 @@ const workerAmzProductUpdater = async (opts) => {
             }
           }
           return {
-            width: +itemDim.Width["$t"],
-            height: +itemDim.Height["$t"],
-            length: +itemDim.Length["$t"],
-            weight: +itemDim.Weight["$t"],
+            width: +(+itemDim.Width["$t"]).toFixed(2),
+            height: +(+itemDim.Height["$t"]).toFixed(2),
+            length: +(+itemDim.Length["$t"]).toFixed(2),
+            weight: +(+itemDim.Weight["$t"]).toFixed(2),
           };
         }, undefined);
-        return { asin: Id, status, data: resItem, packObj };
+
+        const salesRankings = mFunc.forceArray(resItem.SalesRankings);
+        return { asin: Id, status, data: resItem, packObj, salesRankings };
       });
 
-      for (const { data, asin, packObj } of asinsData) {
+      const categoriesId = asinsData.flatMap((e) =>
+        e.salesRankings.map((c) => c.ProductCategoryId)
+      );
+      const { rows: categories } =
+        categoriesId.length > 0
+          ? await client.query(sqlAmzCategoriesByIds, [[categoriesId]])
+          : { rows: [] };
+
+      const ONE_DAY_IN_MS = 24 * 3600 * 1e3;
+      for (const curObject of asinsData) {
+        const { data: mws_product, asin, packObj, salesRankings } = curObject;
+        const dataUpdates = {};
+        let flagNeedGetCategories =
+          !productData.categories ||
+          !productData.categoriesLastUpdate ||
+          +productData.categoriesLastUpdate < Date.now() - ONE_DAY_IN_MS;
+
+        // amzProductCategories
+        // Узнаем есть ИД категорий, которые отсутсвуют в базе ли с пустыми именами
+        const productCategoriesNull = salesRankings
+          .map(({ ProductCategoryId }) => {
+            if (!ProductCategoryId.match(/^[0-9]+$/)) return;
+            const names = categories.filter(
+              (e) => e.category_id == ProductCategoryId && e.name
+            );
+            if (names.length == 0) return ProductCategoryId;
+          })
+          .filter((e) => e);
+        if (productCategoriesNull.length > 0) {
+          flagNeedGetCategories = true;
+        }
+        if (flagNeedGetCategories) {
+          const res = await amzUpdateCategoriesByProductASIN(
+            { ...optsStack, client },
+            cred,
+            asin,
+            categories
+          );
+          if (res) {
+            const { categories, categoryListUpdates } = res;
+            if (categoryListUpdates && Array.isArray(categoryListUpdates)) {
+              updateCategoriesCache(categories, categoryListUpdates);
+            }
+            if (categories && Array.isArray(categories)) {
+              dataUpdates.categories = categories;
+              dataUpdates.categoriesLastUpdate = Date.now();
+            }
+          }
+        }
+        const ranks = salesRankings
+          .map(({ ProductCategoryId, Rank }) => {
+            if (!ProductCategoryId) return undefined;
+            const names = categories
+              .filter((e) => e.category_id == ProductCategoryId && e.name)
+              .map((e) => e.name);
+            if (names.length == 0) return undefined;
+            return {
+              id: ProductCategoryId,
+              name: names[0],
+              rank: +Rank > 0 ? +Rank : Rank,
+            };
+          })
+          .filter((e) => e);
+
+        if (packObj) dataUpdates.pack = packObj;
+        if (ranks && ranks.length > 0) dataUpdates.ranks = ranks;
+        console.log(
+          "%s ranks: ",
+          asin,
+          JSON.stringify(ranks),
+          "  \n",
+          JSON.stringify(dataUpdates)
+        );
         await client.query(sqlAmzProductUpdate, [
           asin,
-          data, // mws_product firels
-          JSON.stringify(packObj ? { pack: packObj } : {}), // data field updates
+          mws_product, // mws_product fields
+          dataUpdates, // data field updates
         ]);
       }
+      console.log("trxWrap end");
     });
   }
 };
