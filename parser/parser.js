@@ -292,9 +292,9 @@ const worker = async (opts) => {
       e.reviewValue = +e.review.replace(",", "");
     }
     if (e.price && typeof e.price == "string") {
-      const matches = e.price.match(/\$\s*([\d.]+)/);
+      const matches = e.price.match(/\$\s*([\d.,]+)/);
       if (matches) {
-        e.priceValue = +matches[1];
+        e.priceValue = +matches[1].replace(",", "");
       }
     }
   });
