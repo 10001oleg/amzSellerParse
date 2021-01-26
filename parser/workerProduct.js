@@ -217,7 +217,7 @@ const workerAmzProductUpdater = async (opts) => {
     if (!(rows.length > 0)) {
       console.log("%s nothing product for update. wait 30sec", logPrefix);
       await new Promise((res) => setTimeout(res, 30e3));
-      return;
+      continue;
     }
 
     await mydb.trxWrap(optsStack, async (client) => {

@@ -104,7 +104,7 @@ SET
   "title" = excluded.title,
   "price" = excluded.price,
   "star" = excluded.star,
-  "data" = p."data" || excluded.data,
+  "data" = p."data" || COALESCE(excluded.data, '{}'::jsonb),
   "is_deleted" = false,
   "_date_updated" = CURRENT_TIMESTAMP
 RETURNING "product_id", "asin"
@@ -116,7 +116,7 @@ SET
   "title" = z->>'title',
   "price" = (z->>'price')::numeric,
   "star" = (z->>'star')::numeric,
-  "data" = p."data" || z->'data',
+  "data" = p."data" || COALESCE((z->'data')::jsonb, '{}'::jsonb),
   "is_deleted" = false,
   "_date_updated" = CURRENT_TIMESTAMP
 FROM jsonb_array_elements($1::jsonb) AS "z"
