@@ -18,16 +18,31 @@ const { handler: requestAmazon } = require("./lib/requestAmazon");
 const creds = JSON.parse(fs.readFileSync(`${__dirname}/amazon_creds.json`));
 const getCred = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} getCred`.trim();
+  if (creds.length == 0) throw Error("no Creds (amazon)");
   for (;;) {
     // throttling workaround:
-    const credCandidate = creds.filter(
-      (e) => (e && !e.lastUsed) || e.lastUsed > Date.now() - 5e3
-    );
-    if (credCandidate.length > 0) return credCandidate[0];
-    console.log("%s throttling wait 1 sec", logPrefix);
+    const curDateNow = Date.now() - 5e3;
+    const credCandidate = creds
+      .sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0))
+      .filter((e) => e)
+      .filter((e) => !e.lastUsed || e.lastUsed < curDateNow);
+    if (credCandidate.length > 0) {
+      const cred = credCandidate[0];
+      console.log(
+        "%s getCred sucess %s/%s name %s",
+        logPrefix,
+        credCandidate.length,
+        creds.length,
+        cred.name
+      );
+      cred.lastUsed = curDateNow;
+      return cred;
+    }
+    console.log("%s: throttling %s wait 1 sec", logPrefix, creds.length);
     await new Promise((res) => setTimeout(res, 5e3));
   }
 };
+
 const sqlAmzProductSelectForUpdate = `
 SELECT *
 FROM "product"
