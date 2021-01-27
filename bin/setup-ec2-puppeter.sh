@@ -1,6 +1,6 @@
 #!/bin/bash
 
-sudo amazon-linux-extras install epel
+sudo amazon-linux-extras install epel -y
 # sudo tee /etc/yum.repos.d/google-chrome.repo <<EOF
 # [google-chrome]
 # name=google-chrome
@@ -23,6 +23,9 @@ sudo sed -i 's/<USER>/ec2-user/' /etc/systemd/system/vncserver@.service
 sudo systemctl daemon-reload
 sudo systemctl enable vncserver@:1
 sudo systemctl start vncserver@:1
+vncpasswd
+touch .vnc/xstartup
+chmod +x .vnc/xstartup
 
 # CPU 100% top (random geenrator)
 sudo systemctl disable --now rngd
