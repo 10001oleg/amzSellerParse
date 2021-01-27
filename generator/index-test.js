@@ -1,7 +1,6 @@
 "use strict";
 
 require("dotenv").config();
-const mydb = require("./lib/mydb");
 
 Error.stackTraceLimit = 100;
 
@@ -14,8 +13,9 @@ const main = async () => {
 };
 main();
 
-const server = require(__dirname + "/server");
-server.serverWorker({ client: mydb });
+// const mydb = require("./lib/mydb");
+// const server = require(__dirname + "/server");
+// server.serverWorker({ client: mydb });
 // const dashboard = async (opts) => {
 
 // };
