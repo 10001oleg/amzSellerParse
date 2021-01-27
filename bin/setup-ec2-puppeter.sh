@@ -50,4 +50,10 @@ hardstatus alwayslastline
 hardstatus string '%{= kg}%{G}%H%{g}|%< %{= kw}%?%-Lw%?%{r}(%{W}%n*%f%t%?(%u)%?%{r})%{w}%?%+Lw%?%?%= %{g}|%{W} %l %{g}|%{B} %{W}%c %{g}'
 EOF
 
-mkdir ~/amzSellerParse ~/amzSellerGenerator
+mkdir ~/adh
+
+[ -f ~/.bashrc ] && PROFILE_RC=". ~/.bashrc"
+[ -f ~/.profile ] && PROFILE_RC=". ~/.profile"
+sudo tee -a /etc/crontab <<EOF
+@reboot         $USER  cd ~/; ${PROFILE_RC}; SHELL=${SHELL}; bash -l ~/adh/bin/startup.sh
+EOF
