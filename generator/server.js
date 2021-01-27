@@ -210,7 +210,7 @@ const serverWorker = async (opts = {}) => {
         await postToAllConnections(optsStack, {
           status: { message: "now generate orders" },
         });
-        await opts.cbCreateNewOrders(optsStack);
+        opts.cbCreateNewOrders(optsStack);
       } else {
         console.log("no function opts.'cbCreateNewOrders'");
       }

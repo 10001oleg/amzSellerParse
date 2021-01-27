@@ -34,9 +34,26 @@ const orderHistogram = [
   { h: 22, v: 9246 },
   { h: 23, v: 9135 },
 ];
-
+let createNewOrderLocked = false;
 const cbCreateNewOrders = async (opts) => {
   const logPrefix = `${opts.logPrefix || ""} cbCreateNewOrders`.trim();
+  if (createNewOrderLocked) {
+    console.error("%s: createNewOrderLocked", logPrefix);
+    return undefined;
+  }
+  try {
+    createNewOrderLocked = true;
+    return await cbCreateNewOrdersImpl(opts);
+  } catch (err) {
+    createNewOrderLocked = false;
+    throw err;
+  } finally {
+    createNewOrderLocked = false;
+  }
+};
+
+const cbCreateNewOrdersImpl = async (opts) => {
+  const logPrefix = `${opts.logPrefix || ""} cbCreateNewOrdersImpl`.trim();
   console.log("%s Start generate orders...", logPrefix);
   const { client } = opts;
   const { rows: stores } = await client.query(sqlStoreSelect);
