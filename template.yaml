@@ -134,7 +134,26 @@ Resources:
       Layers:
         - !Ref lambdaPgLayer
       Role: !GetAtt lambdaRole.Arn
-
+  lambdaDashboard:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Timeout: 10
+      MemorySize: 128
+      Runtime: nodejs12.x
+      CodeUri: ./lambdaDashboard
+      Environment:
+        Variables:
+          DB_URI: !Ref DbUri
+      Layers:
+        - !Ref lambdaPgLayer
+      Role: !GetAtt lambdaRole.Arn
+      Events:
+        GetResource:
+          Type: Api
+          Properties:
+            Path: /dash
+            Method: GET
   lambdaPingPermission:
     Type: AWS::Lambda::Permission
     DependsOn:
