@@ -242,6 +242,12 @@ const worker = async (opts) => {
             const linkBlock = div.querySelector("a.a-link-normal");
             if (linkBlock && linkBlock.href) res.link = linkBlock.href;
           }
+          // prime
+          {
+            const primeBlock = div.querySelector("i.a-icon-prime");
+            res.isPrime =
+              primeBlock && primeBlock.getAttribute("aria-label") ? 1 : 0;
+          }
           return res;
         })
         .filter((e) => e)

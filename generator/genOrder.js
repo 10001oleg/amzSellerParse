@@ -23,6 +23,7 @@ WHERE true
   AND "price" > 0
   AND NOT "is_deleted"
   AND "data" ? 'pack'
+  AND "data"->>'isPrime' = '0'
   AND CASE 
     WHEN $1::integer IS NULL THEN true
     ELSE "store_id" = $1::integer
