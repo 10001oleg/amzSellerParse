@@ -24,6 +24,7 @@ WHERE true
   AND NOT "is_deleted"
   AND "data" ? 'pack'
   AND "data"->>'isPrime' = '0'
+  AND COALESCE("param"->>'state', $2::text) = '1'
   AND CASE 
     WHEN $1::integer IS NULL THEN true
     ELSE "store_id" = $1::integer
@@ -142,9 +143,11 @@ const generateOneOrder = async (
     throw Error("opts.client required!");
   }
   const { rows: params } = await client.query(sqlParamSelectOrderProduct);
+  const { store_id = null, defProductState = 1 } = filter;
 
   const { rows: dirtyProducts } = await client.query(sqlProductRnd, [
-    filter && filter.store_id ? filter.store_id : null,
+    store_id,
+    defProductState,
   ]);
 
   const dbProducts = dirtyProducts.filter((prod) => {

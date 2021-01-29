@@ -74,7 +74,7 @@ const cbCreateNewOrdersImpl = async (opts) => {
     );
     console.log(storeData);
     const {
-      data: { orderCountPerDay },
+      data: { orderCountPerDay, defProductState = 1 },
     } = storeData;
     let hourOrderCount = Math.round(
       orderCountPerDay * hourK * (1 + (Math.random() - 0.5) * 0.1)
@@ -101,7 +101,11 @@ const cbCreateNewOrdersImpl = async (opts) => {
       const res = await genOrder.generateOneOrder(
         { ...opts, logPrefix },
         undefined,
-        { store_id: storeData.store_id, orderDate: +curDate + secOfHour * 1e3 }
+        {
+          store_id: storeData.store_id,
+          orderDate: +curDate + secOfHour * 1e3,
+          defProductState,
+        }
       );
       if (!(res && res.order_date)) {
         console.log("%s Failed create new order...", logPrefix);
